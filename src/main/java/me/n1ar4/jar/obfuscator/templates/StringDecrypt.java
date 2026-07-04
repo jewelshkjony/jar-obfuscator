@@ -21,12 +21,16 @@ import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class StringDecrypt {
     private static final Logger logger = LogManager.getLogger();
     public static String KEY = null;
     private static final String ALGORITHM = "AES";
     private static final Charset CHARSET = StandardCharsets.UTF_8;
+    
+    // Global cache added for performance testing purposes
+    private static final ConcurrentHashMap<String, String> stringCache = new ConcurrentHashMap<>();
 
     public static void changeKEY(String key) {
         if (key == null) {
@@ -64,6 +68,14 @@ public class StringDecrypt {
 
     @SuppressWarnings("unused")
     public static String decrypt(String encrypted) {
+        if (encrypted == null) return null;
+        
+        // 1. Fast path cache retrieval
+        String cached = stringCache.get(encrypted);
+        if (cached != null) {
+            return cached;
+        }
+
         try {
             SecretKeySpec key = new SecretKeySpec(KEY.getBytes(CHARSET), ALGORITHM);
             Cipher cipher = Cipher.getInstance(ALGORITHM);
@@ -86,7 +98,11 @@ public class StringDecrypt {
                 }
             }
             byte[] decryptedBytes = cipher.doFinal(value);
-            return new String(decryptedBytes, CHARSET);
+            String result = new String(decryptedBytes, CHARSET);
+            
+            // 2. Cache result securely before delivering
+            stringCache.putIfAbsent(encrypted, result);
+            return result;
         } catch (Exception e) {
             return null;
         }
