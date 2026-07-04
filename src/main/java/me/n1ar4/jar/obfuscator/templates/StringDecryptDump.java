@@ -20,6 +20,7 @@ public class StringDecryptDump implements Opcodes {
     public static String className = null;
     public static String methodName = null;
     private static String keyName = null;
+    private static final String CACHE_FIELD_NAME = "stringCache";
 
     public static void changeKEY() {
         AES_KEY = StringDecrypt.KEY;
@@ -58,6 +59,7 @@ public class StringDecryptDump implements Opcodes {
         FieldVisitor fieldVisitor;
         MethodVisitor methodVisitor;
         classWriter.visit(V1_6, ACC_PUBLIC | ACC_SUPER, className, null, "java/lang/Object", null);
+        
         {
             fieldVisitor = classWriter.visitField(ACC_PRIVATE | ACC_STATIC, keyName, "Ljava/lang/String;", null, null);
             fieldVisitor.visitEnd();
@@ -67,8 +69,33 @@ public class StringDecryptDump implements Opcodes {
             fieldVisitor.visitEnd();
         }
         {
+            // Inject the ConcurrentHashMap field into the target runtime class map
+            fieldVisitor = classWriter.visitField(ACC_PRIVATE | ACC_FINAL | ACC_STATIC, CACHE_FIELD_NAME, "Ljava/util/concurrent/ConcurrentHashMap;", null, null);
+            fieldVisitor.visitEnd();
+        }
+        
+        {
             methodVisitor = classWriter.visitMethod(ACC_PUBLIC | ACC_STATIC, methodName, "(Ljava/lang/String;)Ljava/lang/String;", null, null);
             methodVisitor.visitCode();
+            
+            // --- CACHE LOOKUP OPTIMIZATION BLOCK START ---
+            Label cacheMissLabel = new Label();
+            methodVisitor.visitVarInsn(ALOAD, 0); // Load encrypted string parameter
+            methodVisitor.visitJumpInsn(IFNULL, cacheMissLabel); // If null, skip cache
+            
+            methodVisitor.visitFieldInsn(GETSTATIC, className, CACHE_FIELD_NAME, "Ljava/util/concurrent/ConcurrentHashMap;");
+            methodVisitor.visitVarInsn(ALOAD, 0);
+            methodVisitor.visitMethodInsn(INVOKEVIRTUAL, "java/util/concurrent/ConcurrentHashMap", "get", "(Ljava/lang/Object;)Ljava/lang/Object;", false);
+            methodVisitor.visitTypeInsn(CHECKCAST, "java/lang/String");
+            methodVisitor.visitVarInsn(ASTORE, 1); // Store result in register index 1 temporary slot
+            
+            methodVisitor.visitVarInsn(ALOAD, 1);
+            methodVisitor.visitJumpInsn(IFNULL, cacheMissLabel); // If not found in map cache, skip to standard decrypt logic
+            methodVisitor.visitVarInsn(ALOAD, 1);
+            methodVisitor.visitInsn(ARETURN); // Instant Cache Hit Return!
+            methodVisitor.visitLabel(cacheMissLabel);
+            // --- CACHE LOOKUP OPTIMIZATION BLOCK END ---
+
             Label label0 = new Label();
             Label label1 = new Label();
             Label label2 = new Label();
@@ -228,6 +255,16 @@ public class StringDecryptDump implements Opcodes {
             methodVisitor.visitVarInsn(ALOAD, 5);
             methodVisitor.visitFieldInsn(GETSTATIC, className, "CHARSET", "Ljava/nio/charset/Charset;");
             methodVisitor.visitMethodInsn(INVOKESPECIAL, "java/lang/String", "<init>", "([BLjava/nio/charset/Charset;)V", false);
+            methodVisitor.visitVarInsn(ASTORE, 6); // Save decrypted string into temporary index 6
+            
+            // --- SAVE TO CACHE BEFORE RETURNING ---
+            methodVisitor.visitFieldInsn(GETSTATIC, className, CACHE_FIELD_NAME, "Ljava/util/concurrent/ConcurrentHashMap;");
+            methodVisitor.visitVarInsn(ALOAD, 0); // Original key
+            methodVisitor.visitVarInsn(ALOAD, 6); // Decrypted string value
+            methodVisitor.visitMethodInsn(INVOKEVIRTUAL, "java/util/concurrent/ConcurrentHashMap", "putIfAbsent", "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;", false);
+            methodVisitor.visitInsn(POP); // Discard output value returned from putIfAbsent
+            
+            methodVisitor.visitVarInsn(ALOAD, 6);
             methodVisitor.visitLabel(label10);
             methodVisitor.visitInsn(ARETURN);
             methodVisitor.visitLabel(label8);
@@ -241,27 +278,22 @@ public class StringDecryptDump implements Opcodes {
             methodVisitor.visitInsn(ARETURN);
             Label label23 = new Label();
             methodVisitor.visitLabel(label23);
-            methodVisitor.visitLocalVariable("decoder", "Ljava/lang/Object;", null, label15, label1, 5);
-            methodVisitor.visitLocalVariable("base64", "Ljava/lang/Class;", "Ljava/lang/Class<*>;", label14, label2, 3);
-            methodVisitor.visitLocalVariable("decoder", "Ljava/lang/Object;", null, label18, label4, 6);
-            methodVisitor.visitLocalVariable("base64", "Ljava/lang/Class;", "Ljava/lang/Class<*>;", label17, label5, 3);
-            methodVisitor.visitLocalVariable("ex", "Ljava/lang/Exception;", null, label20, label9, 6);
-            methodVisitor.visitLocalVariable("e", "Ljava/lang/Exception;", null, label3, label9, 5);
-            methodVisitor.visitLocalVariable("key", "Ljavax/crypto/spec/SecretKeySpec;", null, label11, label8, 1);
-            methodVisitor.visitLocalVariable("cipher", "Ljavax/crypto/Cipher;", null, label12, label8, 2);
-            methodVisitor.visitLocalVariable("base64", "Ljava/lang/Class;", "Ljava/lang/Class<*>;", label9, label8, 3);
-            methodVisitor.visitLocalVariable("value", "[B", null, label0, label8, 4);
-            methodVisitor.visitLocalVariable("decryptedBytes", "[B", null, label21, label8, 5);
-            methodVisitor.visitLocalVariable("e", "Ljava/lang/Exception;", null, label22, label23, 1);
-            methodVisitor.visitLocalVariable("encrypted", "Ljava/lang/String;", null, label6, label23, 0);
-            methodVisitor.visitMaxs(6, 7);
+            methodVisitor.visitMaxs(6, 8);
             methodVisitor.visitEnd();
         }
         {
+            // Static Initializer block (<clinit>)
             methodVisitor = classWriter.visitMethod(ACC_STATIC, "<clinit>", "()V", null, null);
             methodVisitor.visitCode();
             Label label0 = new Label();
             methodVisitor.visitLabel(label0);
+            
+            // Initialize ConcurrentHashMap: stringCache = new ConcurrentHashMap()
+            methodVisitor.visitTypeInsn(NEW, "java/util/concurrent/ConcurrentHashMap");
+            methodVisitor.visitInsn(DUP);
+            methodVisitor.visitMethodInsn(INVOKESPECIAL, "java/util/concurrent/ConcurrentHashMap", "<init>", "()V", false);
+            methodVisitor.visitFieldInsn(PUTSTATIC, className, CACHE_FIELD_NAME, "Ljava/util/concurrent/ConcurrentHashMap;");
+            
             methodVisitor.visitLdcInsn(AES_KEY);
             methodVisitor.visitFieldInsn(PUTSTATIC, className, keyName, "Ljava/lang/String;");
             Label label1 = new Label();
@@ -269,7 +301,7 @@ public class StringDecryptDump implements Opcodes {
             methodVisitor.visitFieldInsn(GETSTATIC, "java/nio/charset/StandardCharsets", "UTF_8", "Ljava/nio/charset/Charset;");
             methodVisitor.visitFieldInsn(PUTSTATIC, className, "CHARSET", "Ljava/nio/charset/Charset;");
             methodVisitor.visitInsn(RETURN);
-            methodVisitor.visitMaxs(1, 0);
+            methodVisitor.visitMaxs(2, 0);
             methodVisitor.visitEnd();
         }
         classWriter.visitEnd();
