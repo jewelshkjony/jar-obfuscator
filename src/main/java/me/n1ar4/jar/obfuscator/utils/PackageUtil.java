@@ -50,29 +50,46 @@ public class PackageUtil {
     public static boolean inBlackClass(String className, BaseConfig config) {
         className = className.replace(".", "/");
 
-        List<String> classBlackList = config.getClassBlackList();
-        List<String> classBlackRegexList = config.getClassBlackRegexList();
+        // Use just one list for all rule types (Exact, *, and **)
+        List<String> blackList = config.getClassBlackList();
 
-        if (classBlackList != null && !classBlackList.isEmpty()) {
-            for (String s : classBlackList) {
-                s = s.replace(".", "/");
-                if (className.equals(s)) {
-                    return true;
+        if (blackList != null && !blackList.isEmpty()) {
+            for (String rule : blackList) {
+                rule = rule.replace(".", "/");
+
+                // Case 1: Deep Wildcard (e.g., com/jewel/**)
+                if (rule.endsWith("/**")) {
+                    String prefix = rule.substring(0, rule.length() - 3);
+                    if (className.startsWith(prefix)) {
+                        return true;
+                    }
+                } 
+                // Case 2: Shallow Wildcard (e.g., com/jewel/fast/*)
+                else if (rule.endsWith("/*")) {
+                    String prefix = rule.substring(0, rule.length() - 2);
+                    if (className.startsWith(prefix)) {
+                        // Ensure they are in the exact same package depth level
+                        long ruleSlashCount = rule.chars().filter(ch -> ch == '/').count();
+                        long classSlashCount = className.chars().filter(ch -> ch == '/').count();
+                        
+                        // "com/jewel/fast/*" has 3 slashes. 
+                        // "com/jewel/fast/Fast" also has 3 slashes -> MATCH
+                        // "com/jewel/fast/build/Docs" has 4 slashes -> SKIPPED
+                        if (ruleSlashCount == classSlashCount) {
+                            return true;
+                        }
+                    }
+                } 
+                // Case 3: Exact Class Match (e.g., com/jewel/fast/Fast)
+                else {
+                    if (className.equals(rule)) {
+                        return true;
+                    }
                 }
             }
         }
 
-        if (classBlackRegexList != null && !classBlackRegexList.isEmpty()) {
-            for (String s : classBlackRegexList) {
-                className = className.replace(".", "/");
-                Pattern pattern = Pattern.compile(s, Pattern.DOTALL);
-                Matcher matcher = pattern.matcher(className);
-                if (matcher.matches()) {
-                    return true;
-                }
-            }
-        }
-
+        // Internal JNI fallback safety check
         if (!internalList.isEmpty()) {
             for (String s : internalList) {
                 s = s.replace(".", "/");
